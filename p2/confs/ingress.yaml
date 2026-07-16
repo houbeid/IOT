@@ -3,11 +3,8 @@ kind: Ingress
 metadata:
   name: apps-ingress
   namespace: default
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
-    # app1.com → app1
     - host: app1.com
       http:
         paths:
@@ -18,8 +15,6 @@ spec:
                 name: app1
                 port:
                   number: 80
-
-    # app2.com → app2 (3 replicas)
     - host: app2.com
       http:
         paths:
@@ -30,8 +25,10 @@ spec:
                 name: app2
                 port:
                   number: 80
-
-    # default → app3 (tout autre HOST)
+    # Pas de "host" ici : Traefik traite cette regle comme le catch-all,
+    # applique seulement si aucune regle avec host ci-dessus ne correspond.
+    # (spec.defaultBackend est mal supporte par le controller Traefik de K3s,
+    # d'ou l'usage de cette syntaxe a la place.)
     - http:
         paths:
           - path: /

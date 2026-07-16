@@ -15,12 +15,11 @@ spec:
     spec:
       containers:
         - name: app3
-          image: nginxdemos/hello
+          image: hashicorp/http-echo
+          args:
+            - "-text=Hello from app3"
           ports:
-            - containerPort: 80
-          env:
-            - name: APP_NAME
-              value: "app3"
+            - containerPort: 5678
 
 ---
 apiVersion: v1
@@ -34,4 +33,4 @@ spec:
   ports:
     - protocol: TCP
       port: 80
-      targetPort: 80
+      targetPort: 5678
