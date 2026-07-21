@@ -1,0 +1,33 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+APP_PORT = 8888
+
+Vagrant.configure("2") do |config|
+
+  config.vm.box = "debian/bookworm64"
+  config.vm.box_check_update = false
+
+  config.vm.define "houbeidS" do |server|
+    server.vm.hostname = "houbeidS"
+
+    server.vm.provider "virtualbox" do |v|
+      # Nom VirtualBox distinct de p1/p2 pour eviter le conflit
+      # "A VirtualBox machine with the name 'houbeidS' already exists"
+      v.name   = "houbeidS-p3"
+      v.cpus   = 2
+      v.memory = 2048
+    end
+
+    # Permet de tester aussi depuis Windows/l'hote via http://localhost:8888
+    # (en plus de curl depuis l'interieur de la VM)
+    server.vm.network "forwarded_port", guest: APP_PORT, host: APP_PORT
+
+    server.vm.provision "shell",
+      path: "scripts/install.sh",
+      env: {
+        "APP_PORT" => APP_PORT.to_s
+      }
+  end
+
+end
