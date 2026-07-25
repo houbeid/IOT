@@ -62,9 +62,12 @@ fi
 # ---------- 6. Cluster K3d ----------
 log_info "=== Creation du cluster K3d ==="
 if ! k3d cluster list 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+  # Pas de --port ici : on utilise kubectl port-forward pour exposer
+  # l'app (voir etape 11), donc pas besoin de reserver le port via k3d.
+  # --agents 0 : un seul node (control-plane) suffit pour ce projet et
+  # allege la charge sur une VM aux ressources limitees.
   k3d cluster create "$CLUSTER_NAME" \
-    --agents 1 \
-    --port "${APP_PORT}:${APP_PORT}@loadbalancer" \
+    --agents 0 \
     --wait
   log_success "Cluster K3d '$CLUSTER_NAME' cree"
 else
@@ -101,10 +104,24 @@ kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
 
 # ---------- 9. Installation Argo CD ----------
 log_info "=== Installation d'Argo CD (namespace argocd) ==="
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# --server-side evite le bug connu "annotations: Too long: may not be more
+# than 262144 bytes" qui survient avec kubectl apply classique sur le gros
+# CRD ApplicationSet d'Argo CD.
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
+  --server-side --force-conflicts
 
-log_info "=== Attente que Argo CD soit pret (peut prendre plusieurs minutes) ==="
-kubectl wait --for=condition=Available deployment/argocd-server -n argocd --timeout=300s
+log_info "=== Attente que Argo CD soit pret (peut prendre jusqu'a 15 minutes) ==="
+RETRIES=0
+until kubectl wait --for=condition=Available deployment/argocd-server -n argocd --timeout=10s 2>/dev/null; do
+  RETRIES=$((RETRIES+1))
+  if [ $RETRIES -ge 90 ]; then
+    log_error "Argo CD ne demarre pas apres 15 minutes"
+    kubectl get pods -n argocd
+    exit 1
+  fi
+  log_info "En attente d'Argo CD... ($RETRIES/90)"
+done
+log_success "Argo CD pret"
 
 # ---------- 10. Deploiement de l'Application (GitOps) ----------
 log_info "=== Deploiement de l'Application Argo CD (pointe vers ${GITHUB_REPO}) ==="
@@ -115,10 +132,32 @@ sleep 20
 kubectl get applications -n argocd
 
 # ---------- 11. Exposition de l'application ----------
-log_info "=== Exposition de wil-playground sur le port ${APP_PORT} ==="
+log_info "=== Exposition de wil-playground sur le port ${APP_PORT} (avec auto-reconnexion) ==="
+# On tue d'abord le SCRIPT DE BOUCLE (le wrapper), puis le tunnel kubectl
+# lui-meme -- sinon tuer seulement le tunnel ne sert a rien, la boucle le
+# relance aussitot.
+pkill -f "port-forward-loop.sh" 2>/dev/null || true
 pkill -f "port-forward.*wil-playground" 2>/dev/null || true
-nohup kubectl port-forward svc/wil-playground -n dev "${APP_PORT}:${APP_PORT}" --address 0.0.0.0 \
-  > /var/log/port-forward.log 2>&1 &
+
+# kubectl port-forward meurt a chaque fois que le pod cible est remplace
+# (ex: redeploiement Argo CD suite a un changement v1 -> v2). Cette boucle
+# le relance automatiquement en ciblant le Service (qui, lui, retrouve
+# toujours le pod actuel tout seul), pour ne jamais avoir a le refaire
+# manuellement pendant les tests ou la soutenance.
+cat > /home/vagrant/port-forward-loop.sh << 'PFLOOP'
+#!/bin/bash
+while true; do
+  kubectl port-forward svc/wil-playground -n dev "${APP_PORT}:8888" --address 0.0.0.0
+  echo "$(date '+%H:%M:%S') Port-forward coupe (pod probablement remplace), reconnexion dans 2s..."
+  sleep 2
+done
+PFLOOP
+chmod +x /home/vagrant/port-forward-loop.sh
+chown vagrant:vagrant /home/vagrant/port-forward-loop.sh
+
+APP_PORT="${APP_PORT}" nohup bash /home/vagrant/port-forward-loop.sh \
+  > /home/vagrant/port-forward.log 2>&1 &
+chown vagrant:vagrant /home/vagrant/port-forward.log 2>/dev/null || true
 sleep 5
 
 # ---------- 12. Verification ----------

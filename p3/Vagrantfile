@@ -15,8 +15,8 @@ Vagrant.configure("2") do |config|
       # Nom VirtualBox distinct de p1/p2 pour eviter le conflit
       # "A VirtualBox machine with the name 'houbeidS' already exists"
       v.name   = "houbeidS-p3"
-      v.cpus   = 2
-      v.memory = 2048
+      v.cpus   = 4
+      v.memory = 4096
     end
 
     # Permet de tester aussi depuis Windows/l'hote via http://localhost:8888
